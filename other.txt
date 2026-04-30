@@ -1,0 +1,29 @@
+CREATE_USER:
+-------------------------------------------------------------------------------------
+from sqlalchemy.exc import IntegrityError
+@app.post("/api/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
+    new_user = models.User(
+        username=user.username,
+        email=user.email
+    )
+    
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return new_user
+        
+    except IntegrityError as e:
+        db.rollback()  # Important! Clean up failed transaction
+        
+        # Parse the error message (database specific)
+        error_msg = str(e.orig)
+        
+        if "username" in error_msg.lower() and "unique" in error_msg.lower():
+            raise HTTPException(detail="Username already exists", status_code=400)
+        elif "email" in error_msg.lower() and "unique" in error_msg.lower():
+            raise HTTPException(detail="Email already exists", status_code=400)
+        else:
+            raise HTTPException(detail="Database error", status_code=500)
+-------------------------------------------------------------------------------------------
