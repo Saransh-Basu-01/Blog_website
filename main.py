@@ -37,7 +37,7 @@ app.include_router(post.router,prefix="/api/posts",tags=["posts"])
 @app.get('/',include_in_schema=False,name="home")
 @app.get('/posts',include_in_schema=False,name="posts")
 async def home(request:Request,db:Annotated[AsyncSession,Depends(get_db)]):
-    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)))
+    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).order_by(models.Post.date_posted.desc()))
     posts=result.scalars().all()
     return templates.TemplateResponse(request,"home.html",{"posts":posts,"title":"Home"})
 
@@ -71,7 +71,7 @@ async def user_posts_page(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="user not found"
         )
-    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).where(models.Post.user_id==user_id))
+    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).where(models.Post.user_id==user_id).order_by(models.Post.date_posted.desc()))
     posts=result.scalars().all()
     return templates.TemplateResponse(
         request,
