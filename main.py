@@ -1,40 +1,46 @@
-from fastapi import FastAPI,Request
 from contextlib import asynccontextmanager
-from fastapi.exception_handlers import (http_exception_handler,request_validation_exception_handler)
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from fastapi import HTTPException,status,Depends
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from typing import Annotated
-from sqlalchemy import select,func
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 import models
-from database import Base,engine,get_db
-from routers import posts,users
 from config import settings
+from database import Base, engine, get_db
+from routers import posts, users
+
 
 @asynccontextmanager
-async def lifespan(_app:FastAPI):
-    #startup
+async def lifespan(_app: FastAPI):
+    # Startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
-    #shutdown
+    # Shutdown
     await engine.dispose()
 
-app=FastAPI(lifespan=lifespan)
 
-app.mount("/static",StaticFiles(directory="static"),name="static")
-app.mount("/media",StaticFiles(directory="media"),name="media")
+app = FastAPI(lifespan=lifespan)
 
-templates=Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
-app.include_router(users.router,prefix="/api/users",tags=["users"])
-app.include_router(posts.router,prefix="/api/posts",tags=["posts"])
+templates = Jinja2Templates(directory="templates")
 
-#returning html pages
+app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(posts.router, prefix="/api/posts", tags=["posts"])
+
+
 @app.get("/", include_in_schema=False, name="home")
 @app.get("/posts", include_in_schema=False, name="posts")
 async def home(request: Request, db: Annotated[AsyncSession, Depends(get_db)]):
@@ -63,67 +69,99 @@ async def home(request: Request, db: Annotated[AsyncSession, Depends(get_db)]):
     )
 
 
-
-@app.get("/posts/{post_id}",include_in_schema=False)
-async def post_page(request:Request,post_id:int,db:Annotated[AsyncSession,Depends(get_db)]):
-    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).where(models.Post.id==post_id))
-    post=result.scalars().first()
+@app.get("/posts/{post_id}", include_in_schema=False)
+async def post_page(
+    request: Request,
+    post_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(models.Post)
+        .options(selectinload(models.Post.author))
+        .where(models.Post.id == post_id),
+    )
+    post = result.scalars().first()
     if post:
-        title=post.title[:50]
+        title = post.title[:50]
         return templates.TemplateResponse(
             request,
             "post.html",
-            {"post":post,"title":title}
+            {"post": post, "title": title},
         )
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="post not found")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
 
-
-@app.get("/users/{user_id}/posts",include_in_schema=False,name="user_posts")
+@app.get("/users/{user_id}/posts", include_in_schema=False, name="user_posts")
 async def user_posts_page(
-    request:Request,
-    user_id:int,
-    db:Annotated[AsyncSession,Depends(get_db)]
+    request: Request,
+    user_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result=await db.execute(select(models.User).where(models.User.id==user_id))
-    user=result.scalars().first()
+    result = await db.execute(select(models.User).where(models.User.id == user_id))
+    user = result.scalars().first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="user not found"
+            detail="User not found",
         )
-    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).where(models.Post.user_id==user_id).order_by(models.Post.date_posted.desc()))
-    posts=result.scalars().all()
+
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(models.Post)
+        .where(models.Post.user_id == user_id),
+    )
+    total = count_result.scalar() or 0
+
+    result = await db.execute(
+        select(models.Post)
+        .options(selectinload(models.Post.author))
+        .where(models.Post.user_id == user_id)
+        .order_by(models.Post.date_posted.desc())
+        .limit(settings.posts_per_page),
+    )
+    posts = result.scalars().all()
+
+    has_more = len(posts) < total
+
     return templates.TemplateResponse(
         request,
         "user_posts.html",
-        {"posts":posts,"user":user,"title":f"{user.username}'s Posts"}
+        {
+            "posts": posts,
+            "user": user,
+            "title": f"{user.username}'s Posts",
+            "limit": settings.posts_per_page,
+            "has_more": has_more,
+        },
     )
 
-@app.get("/Login",include_in_schema=False)
-async def login_page(request:Request):
+
+@app.get("/login", include_in_schema=False)
+async def login_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "Login.html",
-        {"title":"login"}
+        "login.html",
+        {"title": "Login"},
     )
 
 
-@app.get("/Register",include_in_schema=False)
-async def register_page(request:Request):
+@app.get("/register", include_in_schema=False)
+async def register_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "Register.html",
-        {"title":"register"}
+        "register.html",
+        {"title": "Register"},
     )
 
-@app.get("/Account",include_in_schema=False)
-async def account_page(request:Request):
+
+@app.get("/account", include_in_schema=False)
+async def account_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "Account.html",
-        {"title":"Account"}
+        "account.html",
+        {"title": "Account"},
     )
+
 
 @app.exception_handler(StarletteHTTPException)
 async def general_http_exception_handler(
@@ -135,8 +173,7 @@ async def general_http_exception_handler(
 
     message = (
         exception.detail
-        if exception.detail
-        else "An error occurred. Please check your request and try again."
+        or "An error occurred. Please check your request and try again."
     )
 
     return templates.TemplateResponse(
