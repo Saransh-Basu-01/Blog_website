@@ -7,12 +7,13 @@ from fastapi import HTTPException,status,Depends
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from typing import Annotated
-from sqlalchemy import select
+from sqlalchemy import select,func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 import models
 from database import Base,engine,get_db
-from routers import post,users
+from routers import posts,users
+from config import settings
 
 @asynccontextmanager
 async def lifespan(_app:FastAPI):
@@ -31,15 +32,35 @@ app.mount("/media",StaticFiles(directory="media"),name="media")
 templates=Jinja2Templates(directory="templates")
 
 app.include_router(users.router,prefix="/api/users",tags=["users"])
-app.include_router(post.router,prefix="/api/posts",tags=["posts"])
+app.include_router(posts.router,prefix="/api/posts",tags=["posts"])
 
 #returning html pages
-@app.get('/',include_in_schema=False,name="home")
-@app.get('/posts',include_in_schema=False,name="posts")
-async def home(request:Request,db:Annotated[AsyncSession,Depends(get_db)]):
-    result=await db.execute(select(models.Post).options(selectinload(models.Post.author)).order_by(models.Post.date_posted.desc()))
-    posts=result.scalars().all()
-    return templates.TemplateResponse(request,"home.html",{"posts":posts,"title":"Home"})
+@app.get("/", include_in_schema=False, name="home")
+@app.get("/posts", include_in_schema=False, name="posts")
+async def home(request: Request, db: Annotated[AsyncSession, Depends(get_db)]):
+    count_result = await db.execute(select(func.count()).select_from(models.Post))
+    total = count_result.scalar() or 0
+
+    result = await db.execute(
+        select(models.Post)
+        .options(selectinload(models.Post.author))
+        .order_by(models.Post.date_posted.desc())
+        .limit(settings.posts_per_page),
+    )
+    posts = result.scalars().all()
+
+    has_more = len(posts) < total
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "posts": posts,
+            "title": "Home",
+            "limit": settings.posts_per_page,
+            "has_more": has_more,
+        },
+    )
 
 
 
