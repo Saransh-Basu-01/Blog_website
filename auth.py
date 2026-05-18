@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import models
 from config import settings
 from database import get_db
+import hashlib
+import secrets
 
 
 password_hash=PasswordHash.recommended()
@@ -50,7 +52,13 @@ def verify_access_token(token:str)->str|None:
         return None
     else:
         return payload.get("sub")
-    
+
+def generate_reset_token()->str:
+    return secrets.token_urlsafe(32)
+
+def hash_reset_token(token:str)->str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
 async def get_current_user(
         token:Annotated[str,Depends(oauth2_scheme)],
         db:Annotated[AsyncSession,Depends(get_db)]
