@@ -12,6 +12,11 @@ from main import app
 
 POPULATE_IMAGES_DIR = Path("populate_images")
 
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 USERS = [
     {
         "username": "CoreyMSchafer",
@@ -243,6 +248,7 @@ async def clear_existing_data() -> None:
 
     # Clear database tables (order respects foreign keys)
     async with AsyncSessionLocal() as db:
+        await db.execute(delete(models.PasswordResetToken))
         await db.execute(delete(models.Post))
         await db.execute(delete(models.User))
         await db.commit()
